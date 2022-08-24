@@ -1,0 +1,121 @@
+---
+title: "football_rankings"
+author: "Will Holt"
+date: "5/13/2022"
+output: html_document
+---
+
+```{r}
+library(stringr)
+library(glmnet)
+```
+```{r}
+rankings = read.csv("C:\\Users\\Will\\Desktop\\quarterback_rankings.csv")
+```
+```{r}
+stats = read.csv("C:\\Users\\Will\\Desktop\\full_stats.csv")
+```
+```{r}
+stats$Player = str_split_fixed(stats$Player, " \\(", 2)[,1]
+stats$YDS = str_replace(stats$YDS, ",", "")
+stats$Player = str_replace(stats$Player, " II", "")
+stats = stats[,c("Player", "G", "YDS", "Y.A", "TD", "INT", "YDS.1", "TD.1", "PCT", "week")]
+stats$YDS = as.integer(stats$YDS)
+```
+```{r}
+full = merge(rankings, stats, by.x = c("Quarterback", "week") , by.y = c("Player", "week"))
+full$YDS_G = full$YDS/full$G
+full$TD_G = full$TD/full$G
+full$INT_G = full$INT/full$G
+full$YDSR_G = full$YDS.1/full$G
+full$TDR_G = full$TD.1/full$G
+head(full)
+```
+```{r}
+plot(full[c(3, 6, 11, 12, 13, 14, 15, 16)])
+```
+```{r}
+full_test = full[full$week == 7,]
+full_train = full[full$week != 7,]
+```
+```{r}
+full.lm = lm(Ranking_nfl ~ (Y.A + PCT + YDS_G + TD_G + INT_G + YDSR_G + TDR_G), full_train)
+plot(full.lm, c(4,5))
+```
+
+```{r}
+step(full.lm)
+```
+```{r}
+step.lm = lm(formula = Ranking_nfl ~ Y.A + PCT + YDS_G + TD_G + INT_G + YDSR_G, data = full_train)
+summary(step.lm)
+```
+```{r}
+step_coef = step.lm$coefficients
+step_coef
+```
+```{r}
+x = model.matrix(Ranking_nfl ~ Y.A + PCT + YDS_G + TD_G + INT_G + YDSR_G + TDR_G, full_train)[,-1]
+y = full_train$Ranking_nfl
+```
+```{r}
+grid = 10^seq(10, -2, length = 100)
+train = 1:nrow(full_train)
+```
+```{r}
+cv.out = cv.glmnet(x[train,], y[train], alpha = 1, lamda = grid)
+plot(cv.out)
+```
+```{r}
+bestlam = cv.out$lambda.min
+lasso.mod = glmnet(x[train,], y[train], alpha = 1, lamda = grid)
+```
+```{r}
+out = glmnet(x, y, alpha = 1, lamda = grid)
+lasso.coef = predict(out, type = "coefficients", s = bestlam)
+lasso.coef
+```
+```{r}
+fit = predict(out, s = bestlam, newx = x)
+r2 = 1 - sum((y-fit)^2)/sum((y-mean(y))^2)
+r2
+r2adj = 1 - (sum((y-fit)^2)/(nrow(full)-7-1))/(sum((y-mean(y))^2)/(nrow(full)-1))
+r2adj
+```
+```{r}
+lasso_pred = lasso.coef[1] + full_test$Y.A * lasso.coef[2] + full_test$PCT * lasso.coef[3] + full_test$YDS_G * lasso.coef[4] + full_test$TD_G * lasso.coef[5] + full_test$YDSR_G * lasso.coef[7] + full_test$TDR_G * lasso.coef[8]
+
+lasso_pred
+```
+```{r}
+full_test$lasso_pred = lasso_pred
+```
+```{r}
+step_pred = step_coef[1] + full_test$Y.A * step_coef[2] + full_test$PCT * step_coef[3] + full_test$YDS_G * step_coef[4] + full_test$TD_G * step_coef[5] + full_test$INT_G * step_coef[6] + full_test$YDSR_G * step_coef[7]
+
+step_pred
+```
+```{r}
+full_test$step_pred = step_pred
+```
+```{r}
+step_ranking = data.frame(step_pred = sort(step_pred), step_ranking = 1:32)
+lasso_ranking = data.frame(lasso_pred = sort(lasso_pred), lasso_ranking = 1:32)
+full_test1 = merge(full_test, step_ranking, by.x = c("step_pred") , by.y = c("step_pred"))
+full_test1 = merge(full_test1, lasso_ranking, by.x = c("lasso_pred") , by.y = c("lasso_pred"))
+```
+```{r}
+rank_compare = full_test1[,c("Quarterback", "Ranking_nfl", "step_ranking", "lasso_ranking", "week")]
+rank_compare = rank_compare[order(rank_compare$Ranking_nfl),]
+rank_compare
+```
+```{r}
+ave_dif_step = sum(abs(rank_compare$Ranking_nfl - rank_compare$step_ranking))/32
+ave_dif_step
+```
+```{r}
+ave_dif_lasso = sum(abs(rank_compare$Ranking_nfl - rank_compare$lasso_ranking))/32
+ave_dif_lasso
+```
+
+
